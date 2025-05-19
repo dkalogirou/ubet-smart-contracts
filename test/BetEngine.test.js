@@ -80,4 +80,90 @@ describe("BetEngine", function () {
       ).to.be.revertedWith("Odds must be greater than 1.0");
     });
   });
+
+  // --- Tests for matchBet ---
+  describe("matchBet", function () {
+    // Setup: Place a bet before each test in this block
+    beforeEach(async function () {
+      // Place a bet as addr1
+      const marketId = 1;
+      const odds = 250; // 2.5x odds
+      const creatorStake = ethers.utils.parseEther("1.0"); // 1 ETH
+      
+      await betEngine.connect(addr1).placeBet(marketId, odds, { value: creatorStake });
+      // Now betId 1 exists and is ready to be matched
+    });
+
+    it("Should allow a user to match a bet successfully", async function () {
+      const betId = 1;
+      // Get the bet to calculate expected matcher stake
+      const bet = await betEngine.bets(betId);
+      
+      // Calculate expected matcher stake: creatorStake * (odds - 100) / 100
+      // For odds 250 (2.5x) and stake 1 ETH, matcher needs to provide 1.5 ETH
+      const expectedMatcherStake = bet.creatorStake.mul(bet.odds.sub(100)).div(100);
+      
+      // Match the bet and check for the event
+      await expect(betEngine.connect(addr2).matchBet(betId, { value: expectedMatcherStake }))
+        .to.emit(betEngine, "BetMatched")
+        .withArgs(betId, addr1.address, addr2.address, bet.creatorStake, expectedMatcherStake, bet.odds);
+
+      // Verify the bet was updated correctly
+      const updatedBet = await betEngine.bets(betId);
+      expect(updatedBet.matcher).to.equal(addr2.address);
+      expect(updatedBet.matcherStake).to.equal(expectedMatcherStake);
+      expect(updatedBet.status).to.equal(1); // 1 = BetStatus.Matched
+    });
+
+    it("Should fail if bet does not exist", async function () {
+      const nonExistentBetId = 999;
+      const someValue = ethers.utils.parseEther("1.0");
+      
+      await expect(
+        betEngine.connect(addr2).matchBet(nonExistentBetId, { value: someValue })
+      ).to.be.revertedWith("Bet does not exist");
+    });
+
+    it("Should fail if bet is not in Unmatched status", async function () {
+      const betId = 1;
+      const bet = await betEngine.bets(betId);
+      const expectedMatcherStake = bet.creatorStake.mul(bet.odds.sub(100)).div(100);
+      
+      // First, match the bet successfully
+      await betEngine.connect(addr2).matchBet(betId, { value: expectedMatcherStake });
+      
+      // Now try to match it again
+      await expect(
+        betEngine.connect(addrs[0]).matchBet(betId, { value: expectedMatcherStake })
+      ).to.be.revertedWith("Bet is not available for matching");
+    });
+
+    it("Should fail if matcher is the creator", async function () {
+      const betId = 1;
+      const bet = await betEngine.bets(betId);
+      const expectedMatcherStake = bet.creatorStake.mul(bet.odds.sub(100)).div(100);
+      
+      // Try to match own bet
+      await expect(
+        betEngine.connect(addr1).matchBet(betId, { value: expectedMatcherStake })
+      ).to.be.revertedWith("Cannot match your own bet");
+    });
+
+    it("Should fail if matcher sends incorrect stake amount", async function () {
+      const betId = 1;
+      const bet = await betEngine.bets(betId);
+      const expectedMatcherStake = bet.creatorStake.mul(bet.odds.sub(100)).div(100);
+      const incorrectStake = expectedMatcherStake.add(ethers.utils.parseEther("0.1")); // Too much
+      
+      await expect(
+        betEngine.connect(addr2).matchBet(betId, { value: incorrectStake })
+      ).to.be.revertedWith("Incorrect stake amount from matcher");
+      
+      const tooLittleStake = expectedMatcherStake.sub(ethers.utils.parseEther("0.1")); // Too little
+      
+      await expect(
+        betEngine.connect(addr2).matchBet(betId, { value: tooLittleStake })
+      ).to.be.revertedWith("Incorrect stake amount from matcher");
+    });
+  });
 });
