@@ -166,4 +166,108 @@ describe("BetEngine", function () {
       ).to.be.revertedWith("Incorrect stake amount from matcher");
     });
   });
+
+  // --- Tests for resolveBet ---
+  describe("resolveBet", function () {
+    // Setup: Place and match a bet before each test in this block
+    beforeEach(async function () {
+      // Place a bet as addr1
+      const marketId = 1;
+      const odds = 250; // 2.5x odds
+      const creatorStake = ethers.utils.parseEther("1.0"); // 1 ETH
+      
+      await betEngine.connect(addr1).placeBet(marketId, odds, { value: creatorStake });
+      
+      // Match the bet as addr2
+      const betId = 1;
+      const bet = await betEngine.bets(betId);
+      const matcherStake = bet.creatorStake.mul(bet.odds.sub(100)).div(100); // 1.5 ETH
+      
+      await betEngine.connect(addr2).matchBet(betId, { value: matcherStake });
+      // Now betId 1 exists, is matched, and ready to be resolved
+    });
+
+    it("Should allow the owner to resolve a bet with creator as winner", async function () {
+      const betId = 1;
+      const bet = await betEngine.bets(betId);
+      const totalStake = bet.creatorStake.add(bet.matcherStake); // 1 ETH + 1.5 ETH = 2.5 ETH
+      
+      // Get creator's balance before resolution
+      const creatorBalanceBefore = await ethers.provider.getBalance(addr1.address);
+      
+      // Resolve the bet with creator (addr1) as winner
+      await expect(betEngine.connect(owner).resolveBet(betId, addr1.address))
+        .to.emit(betEngine, "BetResolved")
+        .withArgs(betId, addr1.address, addr2.address, totalStake, bet.marketId, bet.odds);
+      
+      // Verify the bet was updated correctly
+      const updatedBet = await betEngine.bets(betId);
+      expect(updatedBet.winner).to.equal(addr1.address);
+      expect(updatedBet.status).to.equal(2); // 2 = BetStatus.Resolved
+      
+      // Verify the winner received the total stake
+      const creatorBalanceAfter = await ethers.provider.getBalance(addr1.address);
+      expect(creatorBalanceAfter.sub(creatorBalanceBefore)).to.equal(totalStake);
+    });
+
+    it("Should allow the owner to resolve a bet with matcher as winner", async function () {
+      const betId = 1;
+      const bet = await betEngine.bets(betId);
+      const totalStake = bet.creatorStake.add(bet.matcherStake); // 1 ETH + 1.5 ETH = 2.5 ETH
+      
+      // Get matcher's balance before resolution
+      const matcherBalanceBefore = await ethers.provider.getBalance(addr2.address);
+      
+      // Resolve the bet with matcher (addr2) as winner
+      await expect(betEngine.connect(owner).resolveBet(betId, addr2.address))
+        .to.emit(betEngine, "BetResolved")
+        .withArgs(betId, addr2.address, addr1.address, totalStake, bet.marketId, bet.odds);
+      
+      // Verify the bet was updated correctly
+      const updatedBet = await betEngine.bets(betId);
+      expect(updatedBet.winner).to.equal(addr2.address);
+      expect(updatedBet.status).to.equal(2); // 2 = BetStatus.Resolved
+      
+      // Verify the winner received the total stake
+      const matcherBalanceAfter = await ethers.provider.getBalance(addr2.address);
+      expect(matcherBalanceAfter.sub(matcherBalanceBefore)).to.equal(totalStake);
+    });
+
+    it("Should fail if caller is not the owner", async function () {
+      const betId = 1;
+      
+      // Try to resolve as non-owner (addr3)
+      await expect(
+        betEngine.connect(addrs[0]).resolveBet(betId, addr1.address)
+      ).to.be.revertedWith("Caller is not the owner");
+    });
+
+    it("Should fail if bet does not exist", async function () {
+      const nonExistentBetId = 999;
+      
+      await expect(
+        betEngine.connect(owner).resolveBet(nonExistentBetId, addr1.address)
+      ).to.be.revertedWith("Bet does not exist");
+    });
+
+    it("Should fail if bet is not in Matched status", async function () {
+      // First, resolve the bet successfully
+      const betId = 1;
+      await betEngine.connect(owner).resolveBet(betId, addr1.address);
+      
+      // Now try to resolve it again
+      await expect(
+        betEngine.connect(owner).resolveBet(betId, addr1.address)
+      ).to.be.revertedWith("Bet is not matched or already resolved/cancelled");
+    });
+
+    it("Should fail if winner is neither creator nor matcher", async function () {
+      const betId = 1;
+      const randomAddress = addrs[0].address; // Neither creator nor matcher
+      
+      await expect(
+        betEngine.connect(owner).resolveBet(betId, randomAddress)
+      ).to.be.revertedWith("Winner must be one of the participants");
+    });
+  });
 });
