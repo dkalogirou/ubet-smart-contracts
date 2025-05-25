@@ -15,16 +15,15 @@ describe("BetEngine", function () {
     BetEngine = await ethers.getContractFactory("BetEngine");
     [owner, addr1, addr2, ...addrs] = await ethers.getSigners();
 
-    // Deploy the contract
+    // Deploy the contract (corrected deployment pattern)
     betEngine = await BetEngine.deploy();
-    await betEngine.deployed();
   });
 
   describe("placeBet", function () {
     it("Should allow a user to place a bet successfully", async function () {
       const marketId = 1;
       const odds = 200; // Represents 2.0 odds (x100)
-      const stake = ethers.utils.parseEther("1.0"); // 1 ETH
+      const stake = ethers.parseEther("1.0"); // 1 ETH - Updated for ethers v6
 
       // Place a bet and check for the event
       await expect(betEngine.connect(addr1).placeBet(marketId, odds, { value: stake }))
@@ -35,13 +34,13 @@ describe("BetEngine", function () {
       const bet = await betEngine.bets(1);
       expect(bet.id).to.equal(1);
       expect(bet.creator).to.equal(addr1.address);
-      expect(bet.matcher).to.equal(ethers.constants.AddressZero); // No matcher yet
+      expect(bet.matcher).to.equal(ethers.ZeroAddress); // Updated for ethers v6
       expect(bet.creatorStake).to.equal(stake);
       expect(bet.matcherStake).to.equal(0); // No matcher stake yet
       expect(bet.odds).to.equal(odds);
       expect(bet.marketId).to.equal(marketId);
       expect(bet.status).to.equal(0); // 0 = BetStatus.Unmatched
-      expect(bet.winner).to.equal(ethers.constants.AddressZero); // No winner yet
+      expect(bet.winner).to.equal(ethers.ZeroAddress); // Updated for ethers v6
 
       // Verify nextBetId was incremented
       expect(await betEngine.nextBetId()).to.equal(2);
@@ -50,7 +49,7 @@ describe("BetEngine", function () {
     it("Should fail if stake is zero", async function () {
       const marketId = 1;
       const odds = 200; // 2.0 odds
-      const zeroStake = ethers.utils.parseEther("0"); // 0 ETH
+      const zeroStake = ethers.parseEther("0"); // Updated for ethers v6
 
       // Attempt to place a bet with zero stake
       await expect(
@@ -61,7 +60,7 @@ describe("BetEngine", function () {
     it("Should fail if marketId is zero", async function () {
       const marketId = 0; // Invalid market ID
       const odds = 200; // 2.0 odds
-      const stake = ethers.utils.parseEther("1.0"); // 1 ETH
+      const stake = ethers.parseEther("1.0"); // Updated for ethers v6
 
       // Attempt to place a bet with zero marketId
       await expect(
@@ -72,12 +71,12 @@ describe("BetEngine", function () {
     it("Should fail if odds are not greater than 100", async function () {
       const marketId = 1;
       const invalidOdds = 100; // 1.0 odds (invalid, must be > 100)
-      const stake = ethers.utils.parseEther("1.0"); // 1 ETH
+      const stake = ethers.parseEther("1.0"); // Updated for ethers v6
 
-      // Attempt to place a bet with invalid odds
+      // Attempt to place a bet with invalid odds - updated error message
       await expect(
         betEngine.connect(addr1).placeBet(marketId, invalidOdds, { value: stake })
-      ).to.be.revertedWith("Odds must be greater than 1.0");
+      ).to.be.revertedWith("Odds must be greater than 1.0 (e.g., 101 for 1.01)");
     });
   });
 
@@ -88,7 +87,7 @@ describe("BetEngine", function () {
       // Place a bet as addr1
       const marketId = 1;
       const odds = 250; // 2.5x odds
-      const creatorStake = ethers.utils.parseEther("1.0"); // 1 ETH
+      const creatorStake = ethers.parseEther("1.0"); // Updated for ethers v6
       
       await betEngine.connect(addr1).placeBet(marketId, odds, { value: creatorStake });
       // Now betId 1 exists and is ready to be matched
@@ -101,7 +100,9 @@ describe("BetEngine", function () {
       
       // Calculate expected matcher stake: creatorStake * (odds - 100) / 100
       // For odds 250 (2.5x) and stake 1 ETH, matcher needs to provide 1.5 ETH
-      const expectedMatcherStake = bet.creatorStake.mul(bet.odds.sub(100)).div(100);
+      // Updated for ethers v6 - using bigint arithmetic with explicit conversion
+      const betOdds = BigInt(bet.odds);
+      const expectedMatcherStake = (bet.creatorStake * (betOdds - BigInt(100))) / BigInt(100);
       
       // Match the bet and check for the event
       await expect(betEngine.connect(addr2).matchBet(betId, { value: expectedMatcherStake }))
@@ -117,7 +118,7 @@ describe("BetEngine", function () {
 
     it("Should fail if bet does not exist", async function () {
       const nonExistentBetId = 999;
-      const someValue = ethers.utils.parseEther("1.0");
+      const someValue = ethers.parseEther("1.0"); // Updated for ethers v6
       
       await expect(
         betEngine.connect(addr2).matchBet(nonExistentBetId, { value: someValue })
@@ -127,7 +128,9 @@ describe("BetEngine", function () {
     it("Should fail if bet is not in Unmatched status", async function () {
       const betId = 1;
       const bet = await betEngine.bets(betId);
-      const expectedMatcherStake = bet.creatorStake.mul(bet.odds.sub(100)).div(100);
+      // Updated for ethers v6 - using bigint arithmetic with explicit conversion
+      const betOdds = BigInt(bet.odds);
+      const expectedMatcherStake = (bet.creatorStake * (betOdds - BigInt(100))) / BigInt(100);
       
       // First, match the bet successfully
       await betEngine.connect(addr2).matchBet(betId, { value: expectedMatcherStake });
@@ -141,7 +144,9 @@ describe("BetEngine", function () {
     it("Should fail if matcher is the creator", async function () {
       const betId = 1;
       const bet = await betEngine.bets(betId);
-      const expectedMatcherStake = bet.creatorStake.mul(bet.odds.sub(100)).div(100);
+      // Updated for ethers v6 - using bigint arithmetic with explicit conversion
+      const betOdds = BigInt(bet.odds);
+      const expectedMatcherStake = (bet.creatorStake * (betOdds - BigInt(100))) / BigInt(100);
       
       // Try to match own bet
       await expect(
@@ -152,14 +157,16 @@ describe("BetEngine", function () {
     it("Should fail if matcher sends incorrect stake amount", async function () {
       const betId = 1;
       const bet = await betEngine.bets(betId);
-      const expectedMatcherStake = bet.creatorStake.mul(bet.odds.sub(100)).div(100);
-      const incorrectStake = expectedMatcherStake.add(ethers.utils.parseEther("0.1")); // Too much
+      // Updated for ethers v6 - using bigint arithmetic with explicit conversion
+      const betOdds = BigInt(bet.odds);
+      const expectedMatcherStake = (bet.creatorStake * (betOdds - BigInt(100))) / BigInt(100);
+      const incorrectStake = expectedMatcherStake + ethers.parseEther("0.1"); // Too much
       
       await expect(
         betEngine.connect(addr2).matchBet(betId, { value: incorrectStake })
       ).to.be.revertedWith("Incorrect stake amount from matcher");
       
-      const tooLittleStake = expectedMatcherStake.sub(ethers.utils.parseEther("0.1")); // Too little
+      const tooLittleStake = expectedMatcherStake - ethers.parseEther("0.1"); // Too little
       
       await expect(
         betEngine.connect(addr2).matchBet(betId, { value: tooLittleStake })
@@ -174,14 +181,16 @@ describe("BetEngine", function () {
       // Place a bet as addr1
       const marketId = 1;
       const odds = 250; // 2.5x odds
-      const creatorStake = ethers.utils.parseEther("1.0"); // 1 ETH
+      const creatorStake = ethers.parseEther("1.0"); // Updated for ethers v6
       
       await betEngine.connect(addr1).placeBet(marketId, odds, { value: creatorStake });
       
       // Match the bet as addr2
       const betId = 1;
       const bet = await betEngine.bets(betId);
-      const matcherStake = bet.creatorStake.mul(bet.odds.sub(100)).div(100); // 1.5 ETH
+      // Updated for ethers v6 - using bigint arithmetic with explicit conversion
+      const betOdds = BigInt(bet.odds);
+      const matcherStake = (bet.creatorStake * (betOdds - BigInt(100))) / BigInt(100);
       
       await betEngine.connect(addr2).matchBet(betId, { value: matcherStake });
       // Now betId 1 exists, is matched, and ready to be resolved
@@ -190,7 +199,7 @@ describe("BetEngine", function () {
     it("Should allow the owner to resolve a bet with creator as winner", async function () {
       const betId = 1;
       const bet = await betEngine.bets(betId);
-      const totalStake = bet.creatorStake.add(bet.matcherStake); // 1 ETH + 1.5 ETH = 2.5 ETH
+      const totalStake = bet.creatorStake + bet.matcherStake; // Updated for ethers v6 - using bigint arithmetic
       
       // Get creator's balance before resolution
       const creatorBalanceBefore = await ethers.provider.getBalance(addr1.address);
@@ -207,13 +216,13 @@ describe("BetEngine", function () {
       
       // Verify the winner received the total stake
       const creatorBalanceAfter = await ethers.provider.getBalance(addr1.address);
-      expect(creatorBalanceAfter.sub(creatorBalanceBefore)).to.equal(totalStake);
+      expect(creatorBalanceAfter - creatorBalanceBefore).to.equal(totalStake); // Updated for ethers v6
     });
 
     it("Should allow the owner to resolve a bet with matcher as winner", async function () {
       const betId = 1;
       const bet = await betEngine.bets(betId);
-      const totalStake = bet.creatorStake.add(bet.matcherStake); // 1 ETH + 1.5 ETH = 2.5 ETH
+      const totalStake = bet.creatorStake + bet.matcherStake; // Updated for ethers v6 - using bigint arithmetic
       
       // Get matcher's balance before resolution
       const matcherBalanceBefore = await ethers.provider.getBalance(addr2.address);
@@ -230,7 +239,7 @@ describe("BetEngine", function () {
       
       // Verify the winner received the total stake
       const matcherBalanceAfter = await ethers.provider.getBalance(addr2.address);
-      expect(matcherBalanceAfter.sub(matcherBalanceBefore)).to.equal(totalStake);
+      expect(matcherBalanceAfter - matcherBalanceBefore).to.equal(totalStake); // Updated for ethers v6
     });
 
     it("Should fail if caller is not the owner", async function () {
